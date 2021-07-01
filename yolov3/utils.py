@@ -19,6 +19,10 @@ import tensorflow as tf
 from yolov3.configs import *
 from yolov3.yolov4 import *
 from tensorflow.python.saved_model import tag_constants
+import pytesseract
+from PIL import Image
+
+pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract'
 
 def load_yolo_weights(model, weights_file):
     tf.keras.backend.clear_session() # used to reset layer names
@@ -126,6 +130,30 @@ def image_preprocess(image, target_size, gt_boxes=None):
         gt_boxes[:, [0, 2]] = gt_boxes[:, [0, 2]] * scale + dw
         gt_boxes[:, [1, 3]] = gt_boxes[:, [1, 3]] * scale + dh
         return image_paded, gt_boxes
+        
+def read_plate_number(path):
+    image = cv2.imread(path)
+    image = cv2.resize(image, None, fx=3, fy=3, interpolation=cv2.INTER_CUBIC)
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    blur = cv2.GaussianBlur(gray, (3, 3), 0)
+    thresh = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)[1]
+
+    # Morph open to remove noise and invert image
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+    opening = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel, iterations=1)
+    invert = 255 - opening
+
+    # Perform text extraction
+    data = pytesseract.image_to_string(invert,
+                                       config='-c tessedit_char_whitelist=0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ --psm 8 --oem 3')
+
+    data = data[:-1]
+
+    if len(data) > 2 and not data[2].isdigit():
+        data = data[1:]
+
+    print(data)
+    return data
 
 def save_cropped_image(cropped_image, image_name, index):
 
@@ -135,6 +163,13 @@ def save_cropped_image(cropped_image, image_name, index):
 
     cropped_image_path = os.path.join(path, image_name + "_" + str(index) + ".jpg")
     cv2.imwrite(cropped_image_path, cropped_image)
+
+    text = read_plate_number(cropped_image_path)
+
+    os.remove(cropped_image_path)
+
+    new_file = os.path.join(path, image_name + "_" + str(index) + "_" + text.strip() + ".jpg")
+    cv2.imwrite(new_file, cropped_image)
 
 def draw_bbox(image, bboxes, CLASSES=YOLO_COCO_CLASSES, show_label=True, show_confidence = True, Text_colors=(255,255,0), rectangle_colors='', tracking=False, image_name=None):
     NUM_CLASS = read_class_names(CLASSES)
